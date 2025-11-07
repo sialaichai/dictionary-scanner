@@ -155,7 +155,7 @@ async function initializeApp() {
             overlay.height = video.videoHeight;
             
             const boxWidth = overlay.width * 0.9;
-            const boxHeight = overlay.height * 0.25;
+            const boxHeight = overlay.height * 0.20;
             
             recognitionBox.left = (overlay.width - boxWidth) / 2;
             recognitionBox.top = (overlay.height - boxHeight) / 2;
