@@ -99,40 +99,14 @@ const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
 const statusText = document.getElementById('status-text');
 
-// --- 4. Main Initialization Function (Stable Version) ---
-async function initializeApp() {
-    
-    // --- Step 1: Load the AI Model First ---
-    // This is the part that will be slow, so we do it first.
-    try {
-        const logger = (m) => {
-            let status = m.status;
-            if (status === "downloading" || status === "loading language model") {
-                // This will show the download progress
-                status = `Loading AI Model... (${status}: ${Math.round(m.progress * 100)}%)`;
-            } else if (status === "initializing" || status === "loaded") {
-                status = "Initializing AI Model...";
-            } else if (status === "recognizing text") {
-                status = `Scanning... (${Math.round(m.progress * 100)}%)`;
-            }
-            statusText.innerHTML = `<p>${status}</p>`;
-        };
-    
-        tesseractWorker = await Tesseract.createWorker('eng+chi_sim', 1, { logger });
+// --- 4. Initialize the App ---
+startCamera();
+loadTesseract();
 
-        // Set parameters
-        await tesseractWorker.setParameters({
-            tessedit_pageseg_mode: '7',
-        });
-
-    } catch (err) {
-        console.error("Tesseract loading error:", err);
-        statusText.innerHTML = "<p>Error: Could not load AI model.</p>";
-        return; // Stop if the AI fails
-    }
-
-
-    // --- Step 2: AI is loaded, now ask for the camera ---
+/**
+ * Task 1: Start the camera immediately
+ */
+async function startCamera() {
     statusText.innerHTML = "<p>Requesting Camera Access...</p>";
     
     try {
@@ -141,7 +115,6 @@ async function initializeApp() {
         video.srcObject = stream;
         videoTrack = stream.getVideoTracks()[0]; 
         
-        // --- Step 3: Once the camera stream starts, set up the scanner ---
         video.onloadedmetadata = () => {
             overlay.width = video.videoWidth;
             overlay.height = video.videoHeight;
@@ -157,16 +130,55 @@ async function initializeApp() {
             hiddenCanvas.width = recognitionBox.width;
             hiddenCanvas.height = recognitionBox.height;
 
-            drawOverlay([]); // Draw initial guide box
+            drawOverlay([]); 
             
-            // --- Step 4: All loaded! Start the scanning loop ---
-            statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
-            setInterval(performScan, SCAN_INTERVAL_MS);
+            if (tesseractWorker) {
+                // AI is ready, camera is ready. Start scanning.
+                statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
+                setInterval(performScan, SCAN_INTERVAL_MS);
+            } else {
+                // Camera is ready, but AI is still loading.
+                statusText.innerHTML = "<p>Loading AI Model (Eng+Chinese)...</p>";
+            }
         };
-    } catch (err)
- {
+    } catch (err) {
         console.error("Camera Error:", err);
-        statusText.innerHTML = "<p>Camera access denied. Please allow camera access in your browser settings.</p>";
+        statusText.innerHTML = "<p>Camera access denied. Please allow camera access.</p>";
+    }
+}
+
+/**
+ * Task 2: Load the Tesseract worker in the background
+ */
+async function loadTesseract() {
+    
+    const logger = (m) => {
+        let status = m.status;
+        if (status === "downloading" || status === "loading language model") {
+            status = `Loading AI Model... (${status}: ${Math.round(m.progress * 100)}%)`;
+        } else if (status === "initializing" || status === "loaded") {
+            status = "Initializing AI Model...";
+        } else if (status === "recognizing text") {
+            status = `Scanning... (${Math.round(m.progress * 100)}%)`;
+        }
+        // Only update if the camera isn't already running
+        if (!video.srcObject) {
+             statusText.innerHTML = `<p>${status}</p>`;
+        }
+    };
+    
+    tesseractWorker = await Tesseract.createWorker('eng+chi_sim', 1, { logger });
+
+    // Set parameters
+    await tesseractWorker.setParameters({
+        tessedit_pageseg_mode: '7',
+    });
+
+    // AI is loaded!
+    if (video.srcObject) {
+        // Camera is already running, so start the scan loop.
+        statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
+        setInterval(performScan, SCAN_INTERVAL_MS);
     }
 }
 
@@ -273,7 +285,9 @@ function processOcrResult(data) {
         if (originalDetectedText.length > 0) {
             statusText.innerHTML = `<p style="text-align: center; color: #FF4136;">Detected: ${originalDetectedText}</p>`;
         } else {
-            statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
+            if (tesseractWorker) {
+                 statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
+            }
         }
     }
 
@@ -303,11 +317,9 @@ function drawOverlay(words = []) {
         const x = box.x0 + recognitionBox.left;
         const y = box.y0 + recognitionBox.top;
         const w = box.x1 - box.x0;
-        const h = box.y1 - box.S0; // Typo from my side, should be box.y1 - box.y0
-        
-        // Correcting the typo:
-        const correct_h = box.y1 - box.y0;
-        ctx.strokeRect(x, y, w, correct_h);
+        const h = box.y1 - box.y0; // The typo here was fixed
+
+        ctx.strokeRect(x, y, w, h);
     });
 }
 
@@ -320,13 +332,11 @@ video.addEventListener('click', () => {
             advanced: [{ focusMode: 'continuous' }]
         }).catch(e => console.error("Focus apply failed:", e));
         
-        statusText.innerHTML = "<p style='text-align: center;'>Focusing...</p>";
-        setTimeout(() => {
-            statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
-        }, 1000);
+        if (tesseractWorker) {
+            statusText.innerHTML = "<p style='text-align: center;'>Focusing...</p>";
+            setTimeout(() => {
+                statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
+            }, 1000);
+        }
     }
 });
-
-// --- 10. Start the App ---
-// This is the only thing that runs at the start.
-initializeApp();
