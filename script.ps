@@ -99,14 +99,39 @@ const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
 const statusText = document.getElementById('status-text');
 
-// --- 4. Initialize the App ---
-startCamera();
-loadTesseract();
+// --- 4. Main Initialization Function (Stable Version) ---
+async function initializeApp() {
+    
+    // --- Step 1: Load the AI Model First ---
+    try {
+        const logger = (m) => {
+            let status = m.status;
+            if (status === "downloading" || status === "loading language model") {
+                status = `Loading AI Model... (${status}: ${Math.round(m.progress * 100)}%)`;
+            } else if (status === "initializing" || status === "loaded") {
+                status = "Initializing AI Model...";
+            } else if (status === "recognizing text") {
+                status = `Scanning... (${Math.round(m.progress * 100)}%)`;
+            }
+            // Check if statusText exists before updating
+            if (statusText) {
+                statusText.innerHTML = `<p>${status}</p>`;
+            }
+        };
+    
+        tesseractWorker = await Tesseract.createWorker('eng+chi_sim', 1, { logger });
 
-/**
- * Task 1: Start the camera immediately
- */
-async function startCamera() {
+        await tesseractWorker.setParameters({
+            tessedit_pageseg_mode: '7',
+        });
+
+    } catch (err) {
+        console.error("Tesseract loading error:", err);
+        statusText.innerHTML = "<p>Error: Could not load AI model.</p>";
+        return; 
+    }
+
+    // --- Step 2: AI is loaded, now ask for the camera ---
     statusText.innerHTML = "<p>Requesting Camera Access...</p>";
     
     try {
@@ -115,6 +140,7 @@ async function startCamera() {
         video.srcObject = stream;
         videoTrack = stream.getVideoTracks()[0]; 
         
+        // --- Step 3: Once the camera stream starts, set up the scanner ---
         video.onloadedmetadata = () => {
             overlay.width = video.videoWidth;
             overlay.height = video.videoHeight;
@@ -130,55 +156,15 @@ async function startCamera() {
             hiddenCanvas.width = recognitionBox.width;
             hiddenCanvas.height = recognitionBox.height;
 
-            drawOverlay([]); 
+            drawOverlay([]); // Draw initial guide box
             
-            if (tesseractWorker) {
-                // AI is ready, camera is ready. Start scanning.
-                statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
-                setInterval(performScan, SCAN_INTERVAL_MS);
-            } else {
-                // Camera is ready, but AI is still loading.
-                statusText.innerHTML = "<p>Loading AI Model (Eng+Chinese)...</p>";
-            }
+            // --- Step 4: All loaded! Start the scanning loop ---
+            statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
+            setInterval(performScan, SCAN_INTERVAL_MS);
         };
     } catch (err) {
         console.error("Camera Error:", err);
-        statusText.innerHTML = "<p>Camera access denied. Please allow camera access.</p>";
-    }
-}
-
-/**
- * Task 2: Load the Tesseract worker in the background
- */
-async function loadTesseract() {
-    
-    const logger = (m) => {
-        let status = m.status;
-        if (status === "downloading" || status === "loading language model") {
-            status = `Loading AI Model... (${status}: ${Math.round(m.progress * 100)}%)`;
-        } else if (status === "initializing" || status === "loaded") {
-            status = "Initializing AI Model...";
-        } else if (status === "recognizing text") {
-            status = `Scanning... (${Math.round(m.progress * 100)}%)`;
-        }
-        // Only update if the camera isn't already running
-        if (!video.srcObject) {
-             statusText.innerHTML = `<p>${status}</p>`;
-        }
-    };
-    
-    tesseractWorker = await Tesseract.createWorker('eng+chi_sim', 1, { logger });
-
-    // Set parameters
-    await tesseractWorker.setParameters({
-        tessedit_pageseg_mode: '7',
-    });
-
-    // AI is loaded!
-    if (video.srcObject) {
-        // Camera is already running, so start the scan loop.
-        statusText.innerHTML = "<p>Aim at dictionary title or model</p>";
-        setInterval(performScan, SCAN_INTERVAL_MS);
+        statusText.innerHTML = "<p>Camera access denied. Please allow camera access in your browser settings.</p>";
     }
 }
 
@@ -285,9 +271,7 @@ function processOcrResult(data) {
         if (originalDetectedText.length > 0) {
             statusText.innerHTML = `<p style="text-align: center; color: #FF4136;">Detected: ${originalDetectedText}</p>`;
         } else {
-            if (tesseractWorker) {
-                 statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
-            }
+            statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
         }
     }
 
@@ -317,7 +301,7 @@ function drawOverlay(words = []) {
         const x = box.x0 + recognitionBox.left;
         const y = box.y0 + recognitionBox.top;
         const w = box.x1 - box.x0;
-        const h = box.y1 - box.y0; // The typo here was fixed
+        const h = box.y1 - box.y0;
 
         ctx.strokeRect(x, y, w, h);
     });
@@ -332,11 +316,12 @@ video.addEventListener('click', () => {
             advanced: [{ focusMode: 'continuous' }]
         }).catch(e => console.error("Focus apply failed:", e));
         
-        if (tesseractWorker) {
-            statusText.innerHTML = "<p style='text-align: center;'>Focusing...</p>";
-            setTimeout(() => {
-                statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
-            }, 1000);
-        }
+        statusText.innerHTML = "<p style='text-align: center;'>Focusing...</p>";
+        setTimeout(() => {
+            statusText.innerHTML = "<p style='text-align: center;'>Aim at dictionary title or model</p>";
+        }, 1000);
     }
 });
+
+// --- 10. Start the App ---
+initializeApp();
